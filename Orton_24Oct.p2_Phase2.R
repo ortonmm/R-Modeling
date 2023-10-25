@@ -110,7 +110,78 @@ prob <- c("1" = 1/8, "2" = 1/8, "3" = 1/8, "4" = 1/8, "5" = 1/8, "6" = 3/8)
 
 prob
 
-##subset the 
+##subset Var1 and Var2 and get the probabilities associated with each individual
+##vector
+rolls$Var1
+
+prob[rolls$Var1]
+rolls$prob1 <- prob[rolls$Var1]
+head(rolls, 3)
+rolls$prob2 <- prob[rolls$Var2]
+
+head(rolls, 3)
+
+##Now, multiplying the probability of V1 by the probability of V2
+##This gives the probability of that combination in the new prob column
+rolls$prob <- rolls$prob1 * rolls$prob2
+head(rolls, 3)
+##Now find the expected average value of rolling two loaded dice
+sum(rolls$value * rolls$prob)
+
+##Goal: find the expected value of the slot machine prize
+##Want to end up with a data set listing the outcomes of Var1 2 and 3, their 
+##probs, and the prob of that combo, and the resulting prize
+##Then sum the prizes, multiply by probability of occurring
+
+#11.1: list the combos
+wheel <- c("DD", "7", "BBB", "BB", "B", "C", "0")
+combos<-expand.grid(wheel, wheel, wheel, stringsAsFactors = FALSE)
+
+##Now find prob of each combo
+get_symbols <- function() {
+  wheel <- c("DD", "7", "BBB", "BB", "B", "C", "0")}
+  sample(wheel, size = 3, replace = TRUE, 
+         prob = c(0.03, 0.03, 0.06, 0.1, 0.25, 0.01, 0.52)
+}
+prob <- c("DD" = 0.03, "7" = 0.03, "BBB" = 0.06, 
+          "BB" = 0.1, "B" = 0.25, "C" = 0.01, "0" = 0.52)
+##Create a dataframe "combos" where each column is the probability of each Variable
+combos$prob1 <- prob[combos$Var1]
+combos$prob2 <- prob[combos$Var2]
+combos$prob3 <- prob[combos$Var3]
+
+head(combos, 3)
+
+#11.4 Calculate probabilities for each combo
+combos$prob <- combos$prob1 * combos$prob2 * combos$prob3
+
+head(combos, 3)
+##Check math; sum of probabilities should be 1
+sum(combos$prob)
+##Assign scores to each combination in combos
+symbols <- c(combos[1, 1], combos[1, 2], combos[1, 3])
+library(bnlearn)
+score("symbols")
+
+##Can't get score() to work for some reason so the rest is just notes on
+##making loops
+#for(variable in vector) {function that uses same variable}
+#while loop reruns a chunk while a certain condition(logical test at the start of loop) remains true
+#while(condition or logical test){code}
+#if condition evaluates to false, while will finish the loop
+
+#repeat loops
+##can do within a function
+###function(arguments){code
+  #repeat {code if (condition) {break}}}
+
+
+
+
+
+
+
+
 
 
 
