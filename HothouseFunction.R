@@ -1,20 +1,23 @@
-#Cleaned up EDM model finder
-#Given code:
-###installing packages - only need to do once
-install.packages("rio")
-install.packages("devtools")
-library(devtools)
-devtools::install_github("tanyalrogers/GPEDM",force=TRUE)
-
-
 ###Loading data
-library(rio); library(GPEDM);
-alldat0=import("~/Downloads/NOAA_EcosystemData_11-8-2023.csv") 
+library(rio); 
+library(GPEDM);
+# alldatN=import("~/Downloads/NOAA_EcosystemData_11-8-2023.csv")
+alldat0=import("~/Downloads/NOAA_EcosystemData_11-8-2023.csv")
 SpeciesUse=c(103,104,105,106,107,108,13,131,135,141,143,15,156,163,164,171,172,193,194,197,23,24,26,301,33,34,35,401,502,503,72,73,74,76,77,78)
 DataEntriesUse=alldat0[,"SVSPP"]%in%SpeciesUse
 SpeciesNamesCodes=unique(alldat0[DataEntriesUse,c("SVSPP","spnm")])
 alldat=as.matrix(alldat0[DataEntriesUse, -c(17,18)])
 
+
+
+
+
+
+###Functions we will use
+#plotGPpredSimp plots a the output of a fitGP() call
+#SpName - name of species analyzed, used in titles
+#This function will save the plot as a PDF file in the working directory on your computer
+#Saved plots have a consistent size/layout, but you'll need to open them, print screen, and then paste & crop into a document
 plotGPpredSimp=function(fit,SpName){
   pred=fit$outsampresults; pred=pred[order(pred[,1]),]; up=head(unique(pred[,2]),15);
   info=round(c(E=fit$inputs$E,R2=fit$outsampfitstats[1]),2)
@@ -81,11 +84,11 @@ nrm2=function (x, Lvl = rep(1, length(x)), xuse = rep(TRUE, length(x)),zeroNullS
 popsFilterSimp=function(datfull,envtDrivers=NULL){
   sa=serialAgg(datfull,c("spp","pop"),"n",FUN=function(x) c(mean(x!=0 & !is.na(x)), sum(x!=0 & !is.na(x)), sum(!is.na(x))))
   colnames(sa)[3:5]=c("muPres","nPres","nObs")
-  use=sa[,"nPres"]>9 & sa[,"nObs"]>12
+  use=sa[,"nPres"]>9 & sa[,"nObs"]>12 & sa[,"pop"]!=35
   adi=datfull[codify(datfull[,c("spp","pop")])%in%codify(sa[use,c("spp","pop")]),]
   
   #log population biomass, call it new column logn
-  #adi=cbind(adi,logn=log(zrochkSer(adi[,"n"],adi[,"spp"])))
+  # adi=cbind(adi,logn=log(zrochkSer(adi[,"n"],adi[,"spp"])))
   #normalize biomass by species and location
   ID=IDn=1e4*adi[,"spp"]+adi[,"pop"]
   adi[,"logn"]=nrm2(adi[,"logn"],IDn,zeroNullSD=TRUE)
@@ -97,84 +100,83 @@ popsFilterSimp=function(datfull,envtDrivers=NULL){
   adi[!is.na(adi[,"logn"]),]
 }
 
-EnvtDatColumns=c("wtemp", "stemp", "zp", "nao")
-NoZP=c("wtemp", "stemp", "nao")
-##Creates a new matrix that is simplified to work with
-MyData<-cbind(spp=alldat[,"SVSPP"], pop=round(alldat[,"DECDEG_BEGLAT"]),
-              yr=alldat[,"GMT_YEAR"], n=alldat[,"EXPCATCHWT"], alldat[,c(EnvtDatColumns,"fall", "logn")])
+
+EnvtDatColumns=c("wtemp","stemp","zp","nao")
+MyData=cbind(spp=alldat[,"SVSPP"], pop=round(alldat[,"DECDEG_BEGLAT"]),
+             yr=alldat[,"GMT_YEAR"], n=alldat[,"EXPCATCHWT"], alldat[,c(EnvtDatColumns,"fall","logn")])
+
+#Select only fall for now
 MyDataUse=MyData[MyData[,"fall"]==1,]
 MyDataAgg=serialAgg(MyDataUse,AggCats=c("spp","pop","yr"))
+myDataFiltered=popsFilterSimp(MyDataAgg,envtDrivers=EnvtDatColumns)
 
+#PRedict climate
+
+
+fitGP=function(...) suppressWarnings(GPEDM::fitGP(...))
+mmu=function(m){ s=cor(m,use="pairwise.complete.obs"); mean(s[upper.tri(s)],na.rm=TRUE); }
+matricize=function(di){
+  tl=range(di[,2],na.rm=TRUE); ts=tl[1]+(0:diff(tl)); pops=sort(unique(di[,1]));
+  m=matrix(NA,length(pops),length(ts)); for(i in 1:nrow(di)) m[pops==di[i,1], ts==di[i,2]]=di[i,3]; m[1:nrow(m),];
+}
+popSync=function(dat) mmu(t(matricize(dat[,c("pop","yr","logn")])))
+PhiGet=function(gpModel){ 
+  vs=colSums(matrix(head(gpModel$pars,-3),nrow=gpModel$inputs$E)); 
+  names(vs)=c("Phi_logn",paste0("Phi_",EnvtDatColumns)); vs; 
+}
+
+MyDataUse=MyData[MyData[,"fall"]==1,]
+MyDataAgg=serialAgg(MyDataUse,AggCats=c("spp","pop","yr"))
 myDataFiltered=popsFilterSimp(MyDataAgg,envtDrivers=EnvtDatColumns)
 
 
-#Function and code to use
+sppCode=163; E=6;
+varsChange=c("stemp","zp")
+ChangeLvl=c(1.5,-1.5)
 
-BestER<-function(data,E,number,year, EDCi=EnvtDatColumns){
-  species=data[data[,"spp"]==number & data[,"yr"]%in%(year),]
-  R<-1:6
-  for(E in 1:6) {
-    fiti=fitGP(data=species, y="logn", x=c("logn", EDCi), pop="pop", E=E, tau=1, scaling="none", predictmethod="loo")
-    R[E]<-fiti$outsampfitstats[1]}
-  BestE<-which.max(R)
-  BestRs<-R[BestE]
-  Results<-round(c(number, BestE, BestRs),2)
-  return(Results)
-}
-
-fitGP=function(...) suppressWarnings(GPEDM::fitGP(...))
-
-for(speciesi in c(74, 76, 77, 78, 72, 141, 103)){
-  print(BestER(data=myDataFiltered, E=E, number = speciesi, year = 1977:2016, EDCi=EnvtDatColumns))
-}
-
-#Graphing
-numberi=103
-E=6
-species=myDataFiltered[myDataFiltered[,"spp"]==numberi & myDataFiltered[,"yr"]%in%(1977:2008),]
-fiti=fitGP(data=species, y="logn", x=c("logn", EnvtDatColumns), pop="pop", E=E, tau=1, scaling="none", predictmethod="loo")
-plotGPpredSimp(fiti,"Summer Flounder")
-
-#Spring dataset
-MyData<-cbind(spp=alldat[,"SVSPP"], pop=round(alldat[,"DECDEG_BEGLAT"]),
-              yr=alldat[,"GMT_YEAR"], n=alldat[,"EXPCATCHWT"], alldat[,c(EnvtDatColumns,"fall","logn")])
-MyDataUseSpring=MyData[MyData[,"fall"]==0,]
-MyDataAggSpring=serialAgg(MyDataUseSpring,AggCats=c("spp","pop","yr"))
-
-myDataFilteredSpring=popsFilterSimp(MyDataAggSpring,envtDrivers=EnvtDatColumns)
-
-#Both dataset
-MyData<-cbind(spp=alldat[,"SVSPP"], pop=round(alldat[,"DECDEG_BEGLAT"]),
-              yr=alldat[,"GMT_YEAR"], n=alldat[,"EXPCATCHWT"], alldat[,c(EnvtDatColumns,"fall","logn")])
-MyDataUseBoth=MyData[MyData[,"fall"]==0|1,]
-MyDataAggBoth=serialAgg(MyDataUseBoth,AggCats=c("spp","pop","yr"))
-
-myDataFilteredBoth=popsFilterSimp(MyDataAggBoth,envtDrivers=EnvtDatColumns)
-
-
-
-#function
-GiveRMSE<-function(Season, SpeciesID, E){
-  MyDataUse=MyData[MyData[,"fall"]==Season,]
-  MyDataAgg=serialAgg(MyDataUse,AggCats=c("spp","pop","yr"))
-  myDataFiltered=popsFilterSimp(MyDataAgg,envtDrivers=EnvtDatColumns)
-  species=myDataFiltered[myDataFiltered[,"spp"]==SpeciesID & myDataFiltered[,"yr"]%in%(1977:2016),]
+#Given a species, E of species, which var we're changing
+hothouseSim<-function(sppCode,E,varsChange=c("stemp","zp"), ChangeLvl=c(1.5,-1.5))
+                        {
+    
+    #Step1: select data
+    dataOrig=myDataFiltered[myDataFiltered[,"spp"]==sppCode & myDataFiltered[,"yr"]%in%(1977:2008),]
+    
+    dataOrigYears=unique(dataOrig[,"yr"])
+    fiti<-fitGP(dataOrig,y="logn", x=c("logn",EnvtDatColumns), pop="pop", E=E, tau=1, scaling="none", predictmethod="loo")
+    Phis=PhiGet(fiti)
+    
+  #set up object to store new data
+    dataNew=dataOrig[dataOrig[,"yr"]>2000,]
+    
+  #run simulations with new environment
+  for(t in 2009:3009){
+    
+    
+  ##for year t, first, predict new abundance
+    dataNew_Nt=predict(fiti,newdata=dataNew[dataNew[,"yr"]%in%((t-1):(t-1-E)),])
+    dataNew_Nt=na.omit(dataNew_Nt$outsampresults[,"predmean"])
+    dataNew_Nt
+    
+    set.seed(t); yrUse_t=sample(dataOrigYears,1);
+    dataNew_t=dataOrig[dataOrig[,"yr"]==yrUse_t,]
+    dataNew_t[,"yr"]=t
+    dataNew_t[,"logn"]=dataNew_Nt
+  #alter environment
+  for(i in varsChange) dataNew_t[,i]=dataNew_t[,i]+ChangeLvl[varsChange==i]
+    
+    dataNew=rbind(dataNew,dataNew_t)
+  }
   
-  fiti=fitGP(data=species[species[,"yr"]<2002,], y="logn", x=c("logn",EnvtDatColumns), pop="pop", E=E, tau=1,scaling="none", predictmethod="loo")
-  fiti$outsampfitstats[1]
-  
-  result=matrix(nrow=15,ncol=2)
-  for(i in 2002:(2013+3*(Season==1))){
-    predi=c(i,predict(fiti,newdata=species[species[,"yr"]%in%(i:(i-E)),])$outsampfitstats[2])
-    result[i-2001,]=predi}
-  return(result)
+  Sync=popSync(dataNew)
+  SD=sd(dataNew[,"logn"])
+  mu=mean(dataNew[,"logn"])
+          
+  return(c(Phis,Sync=Sync,SD=SD,mu=mu))
 }
 
-answer<-GiveRMSE(0, 77, 6)
-answer
-write.csv(round(t(answer),2),"RedHakeSpring.csv")
-
-getwd() #saved here
 
 
+#want to get: synchrony, mean, sd
+
+hothouseSim(sppCode=103,E=6, varsChange=c("stemp", "wtemp", "zp"), ChangeLvl=c(1.5,1.5,-1.5))
 
